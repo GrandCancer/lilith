@@ -1,0 +1,43 @@
+name: 自动更新 update.json
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 解析版本号和 APK 地址
+        id: info
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          APK_URL=$(jq -r '[.release.assets[] | select(.name | endswith(".apk"))][0].browser_download_url' "$GITHUB_EVENT_PATH")
+          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
+            echo "::error::Release 里没有找到 .apk 附件"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: 生成 update.json
+        run: |
+          printf '{"version":"%s","apk":"%s"}\n' "${{ steps.info.outputs.version }}" "${{ steps.info.outputs.apk_url }}" > update.json
+          cat update.json
+
+      - name: 提交 update.json 到 main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git add update.json
+          git commit -m "release: update.json → ${{ steps.info.outputs.version }}" || echo "无变化"
+          git push origin main
